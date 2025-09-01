@@ -1,9 +1,49 @@
-# helloworld
+# 关键词回复插件 
 
-AstrBot 插件模板
+一个简单的关键词回复插件，支持检测用户消息中的关键词并自动回复设置好的内容。
 
-A template plugin for AstrBot plugin feature
+## 安装
+1. 将插件文件夹放入 AstrBot 的 `plugins` 目录
+2. 重启 AstrBot 或重新加载插件
+3. 插件会自动创建默认的关键词数据
 
-# 支持
+## 命令
+- `/kr list` - 查看所有关键词规则
+- `/kr add <关键词> <回复内容>` - 添加新的关键词回复
+- `/kr del <关键词>` - 删除关键词回复
+- `/kr reload` - 重新加载配置
 
-[帮助文档](https://astrbot.app)
+
+## 配置选项
+
+| 选项 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enable_regex` | bool | false | 启用正则表达式匹配模式 |
+| `case_sensitive` | bool | false | 启用大小写敏感匹配 |
+| `reply_probability` | float | 1.0 | 回复概率 (0.0-1.0) |
+| `data_file` | string | keywords.json | 关键词数据文件名 |
+
+## 数据格式
+
+关键词数据存储在 `data/keywords.json` 文件中，格式如下：
+
+```json
+{
+  "你好": ["你好！", "嗨！", "Hello！"],
+  "再见": ["再见！", "拜拜！", "Goodbye！"],
+  "谢谢": "不客气！"
+}
+```
+
+## 🔧 高级功能
+
+### 正则表达式支持
+启用 `enable_regex` 后，关键词将被视为正则表达式：
+```json
+{
+  "\\d+": ["我看到了数字！", "有数字呢~"],
+  "[Hh]ello": ["Hello!", "Hi there!"]
+}
+```
+
+### 如有问题，请在 GitHub 上提交 Issue 或联系作者。

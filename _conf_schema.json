@@ -1,0 +1,20 @@
+{
+  "enable_regex": {
+    "description": "启用正则表达式模式",
+    "type": "bool",
+    "hint": "启用后，关键词将被视为正则表达式进行匹配。谨慎使用，错误的正则表达式可能导致匹配失败。",
+    "default": false
+  },
+  "case_sensitive": {
+    "description": "大小写敏感",
+    "type": "bool", 
+    "hint": "启用后，关键词匹配将区分大小写。例如：'Hello' 和 'hello' 将被视为不同的关键词。",
+    "default": false
+  },
+  "reply_probability": {
+    "description": "回复概率",
+    "type": "float",
+    "hint": "设置机器人回复的概率，范围 0.0-1.0。1.0 表示 100% 回复，0.5 表示 50% 概率回复。",
+    "default": 1.0
+  }
+}
