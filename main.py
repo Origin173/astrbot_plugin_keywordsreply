@@ -10,7 +10,7 @@ import json
     "astrbot_plugin_keywordsreply",
     "Origin173",
     "一个检测到关键词就会回复预定文本的插件",
-    "1.0",
+    "1.0.0",
     "https://github.com/Origin173/astrbot_plugin_keywordsreply",
 )
 class krPlugin(Star):
