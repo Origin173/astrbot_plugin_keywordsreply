@@ -21,7 +21,6 @@
 | `enable_regex` | bool | false | 启用正则表达式匹配模式 |
 | `case_sensitive` | bool | false | 启用大小写敏感匹配 |
 | `reply_probability` | float | 1.0 | 回复概率 (0.0-1.0) |
-| `data_file` | string | keywords.json | 关键词数据文件名 |
 
 ## 数据格式
 
