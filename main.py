@@ -4,13 +4,14 @@ from astrbot.api import logger
 import re
 import os
 import json
+import random
 
 
 @register(
     "astrbot_plugin_keywordsreply",
     "Origin173",
     "一个检测到关键词就会回复预定文本的插件",
-    "1.0.0",
+    "1.1.0",
     "https://github.com/Origin173/astrbot_plugin_keywordsreply",
 )
 class krPlugin(Star):
@@ -18,15 +19,42 @@ class krPlugin(Star):
         super().__init__(context)
         self.config = config or {}
 
-        self.default_keywords = {}
+        self.plugin_name = "astrbot_plugin_keywordsreply"
+        
+        self.default_keywords = {
+            "你好": ["你好！", "嗨！", "Hello！"],
+            "再见": ["再见！", "拜拜！", "Goodbye！"],
+        }
 
         self.keywords = self._load_keywords()
+        self._normalize_keywords()
 
         self.enable_regex = self.config.get("enable_regex", False)
         self.case_sensitive = self.config.get("case_sensitive", False)
         self.reply_probability = self.config.get("reply_probability", 1.0)
 
         logger.info(f"关键词回复插件已加载，共 {len(self.keywords)} 个关键词规则")
+
+    @property
+    def keywords_file_path(self) -> str:
+        """获取关键词配置文件路径"""
+        try:
+            if hasattr(self.context, 'get_data_dir'):
+                data_dir = self.context.get_data_dir(self.plugin_name)
+            else:
+                data_dir = os.path.join(os.path.dirname(__file__), "data")
+                logger.warning("使用备用数据目录方案，建议升级 AstrBot 以使用框架数据管理")
+            
+            return os.path.join(data_dir, "keywords.json")
+        except Exception as e:
+            logger.warning(f"无法获取框架数据目录，使用备用方案: {e}")
+            return os.path.join(os.path.dirname(__file__), "data", "keywords.json")
+
+    def _normalize_keywords(self):
+        """确保所有关键词的回复都是列表格式"""
+        for keyword, replies in self.keywords.items():
+            if not isinstance(replies, list):
+                self.keywords[keyword] = [str(replies)]
 
     @filter.command_group("kr")
     def kr(self):
@@ -64,19 +92,15 @@ class krPlugin(Star):
     async def add_keyword(self, event: AstrMessageEvent, keyword: str, reply: str):
         """添加新的关键词回复"""
         if keyword in self.keywords:
-            if isinstance(self.keywords[keyword], list):
-                if reply not in self.keywords[keyword]:
-                    self.keywords[keyword].append(reply)
-                    yield event.plain_result(
-                        f"已为关键词 '{keyword}' 添加新回复：{reply}"
-                    )
-                else:
-                    yield event.plain_result(
-                        f"关键词 '{keyword}' 已存在相同的回复内容。"
-                    )
+            if reply not in self.keywords[keyword]:
+                self.keywords[keyword].append(reply)
+                yield event.plain_result(
+                    f"已为关键词 '{keyword}' 添加新回复：{reply}"
+                )
             else:
-                self.keywords[keyword] = [self.keywords[keyword], reply]
-                yield event.plain_result(f"已为关键词 '{keyword}' 添加新回复：{reply}")
+                yield event.plain_result(
+                    f"关键词 '{keyword}' 已存在相同的回复内容。"
+                )
         else:
             self.keywords[keyword] = [reply]
             yield event.plain_result(f"已添加新关键词 '{keyword}'，回复：{reply}")
@@ -118,8 +142,6 @@ class krPlugin(Star):
         if message_str.startswith("/"):
             return
 
-        import random
-
         if random.random() > self.reply_probability:
             return
 
@@ -138,11 +160,18 @@ class krPlugin(Star):
 
             if self.enable_regex:
                 try:
-                    if re.search(check_keyword, check_message):
-                        reply = self._get_random_reply(replies)
-                        return keyword, reply
-                except re.error:
-                    logger.warning(f"正则表达式 '{keyword}' 无效，跳过")
+                    if self._is_safe_regex(check_keyword):
+                        if re.search(check_keyword, check_message):
+                            reply = self._get_random_reply(replies)
+                            return keyword, reply
+                    else:
+                        logger.warning(f"正则表达式 '{keyword}' 可能存在安全风险，跳过")
+                        continue
+                except re.error as e:
+                    logger.warning(f"正则表达式 '{keyword}' 无效，跳过: {e}")
+                    continue
+                except Exception as e:
+                    logger.error(f"正则表达式匹配时发生未知错误: {e}")
                     continue
             else:
                 if check_keyword in check_message:
@@ -151,19 +180,39 @@ class krPlugin(Star):
 
         return None, None
 
+    def _is_safe_regex(self, pattern: str) -> bool:
+        """正则表达式安全检查"""
+        dangerous_patterns = [
+            r'\(\?\:',  
+            r'\(\?\!', 
+            r'\(\?\<',  
+            r'\*\+',    
+            r'\+\*',    
+            r'\*\*',   
+            r'\+\+',   
+            r'\(\.*\+.*\)\+',  
+            r'\{.*\}.*\{.*\}', 
+        ]
+        
+        if len(pattern) > 100:
+            return False
+            
+        for dangerous in dangerous_patterns:
+            if re.search(dangerous, pattern):
+                return False
+                
+        return True
+
     def _get_random_reply(self, replies) -> str:
         """从回复列表中随机选择一个回复"""
-        import random
-
-        if isinstance(replies, list):
+        if isinstance(replies, list) and replies:
             return random.choice(replies)
         else:
             return str(replies)
 
     def _load_keywords(self) -> dict:
         """加载关键词配置"""
-
-        keywords_file = os.path.join(os.path.dirname(__file__), "data", "keywords.json")
+        keywords_file = self.keywords_file_path
 
         if os.path.exists(keywords_file):
             try:
@@ -171,8 +220,17 @@ class krPlugin(Star):
                     keywords = json.load(f)
                 logger.info(f"成功加载关键词配置文件：{keywords_file}")
                 return keywords
+            except json.JSONDecodeError as e:
+                logger.error(f"关键词配置文件 JSON 格式错误：{e}")
+                return self.default_keywords
+            except PermissionError as e:
+                logger.error(f"无权限读取关键词配置文件：{e}")
+                return self.default_keywords
+            except FileNotFoundError as e:
+                logger.error(f"关键词配置文件未找到：{e}")
+                return self.default_keywords
             except Exception as e:
-                logger.error(f"加载关键词配置文件失败：{e}")
+                logger.error(f"加载关键词配置文件时发生未知错误：{e}")
                 return self.default_keywords
         else:
             logger.info("关键词配置文件不存在，使用默认配置")
@@ -180,17 +238,21 @@ class krPlugin(Star):
 
     async def _save_keywords(self):
         """保存关键词配置"""
-
-        keywords_file = os.path.join(os.path.dirname(__file__), "data", "keywords.json")
-
-        os.makedirs(os.path.dirname(keywords_file), exist_ok=True)
+        keywords_file = self.keywords_file_path
 
         try:
+            # 确保目录存在
+            os.makedirs(os.path.dirname(keywords_file), exist_ok=True)
+            
             with open(keywords_file, "w", encoding="utf-8") as f:
                 json.dump(self.keywords, f, ensure_ascii=False, indent=2)
             logger.info(f"关键词配置已保存到：{keywords_file}")
+        except PermissionError as e:
+            logger.error(f"无权限写入关键词配置文件：{e}")
+        except OSError as e:
+            logger.error(f"写入关键词配置文件时发生系统错误：{e}")
         except Exception as e:
-            logger.error(f"保存关键词配置失败：{e}")
+            logger.error(f"保存关键词配置时发生未知错误：{e}")
 
     async def terminate(self):
         """插件卸载时调用"""
