@@ -11,7 +11,7 @@ import random
     "astrbot_plugin_keywordsreply",
     "Origin173",
     "一个检测到关键词就会回复预定文本的插件",
-    "1.1.0",
+    "1.2.0",
     "https://github.com/Origin173/astrbot_plugin_keywordsreply",
 )
 class krPlugin(Star):
@@ -29,9 +29,7 @@ class krPlugin(Star):
         self.keywords = self._load_keywords()
         self._normalize_keywords()
 
-        self.enable_regex = self.config.get("enable_regex", False)
-        self.case_sensitive = self.config.get("case_sensitive", False)
-        self.reply_probability = self.config.get("reply_probability", 1.0)
+        self._load_runtime_settings()
 
         logger.info(f"关键词回复插件已加载，共 {len(self.keywords)} 个关键词规则")
 
@@ -56,6 +54,89 @@ class krPlugin(Star):
             if not isinstance(replies, list):
                 self.keywords[keyword] = [str(replies)]
 
+    def _load_runtime_settings(self):
+        """从配置中加载运行时设置"""
+        self.enable_regex = bool(self.config.get("enable_regex", False))
+        self.case_sensitive = bool(self.config.get("case_sensitive", False))
+
+        try:
+            probability = float(self.config.get("reply_probability", 1.0))
+        except (TypeError, ValueError):
+            probability = 1.0
+            logger.warning("配置项 reply_probability 解析失败，已重置为 1.0")
+        self.reply_probability = max(0.0, min(1.0, probability))
+
+        whitelist_cfg = self.config.get("whitelist", []) or []
+        if isinstance(whitelist_cfg, (str, bytes)):
+            whitelist_values = [str(whitelist_cfg)]
+        else:
+            whitelist_values = list(whitelist_cfg)
+
+        self.whitelist = {
+            str(item).strip()
+            for item in whitelist_values
+            if str(item).strip()
+        }
+
+        if self.whitelist:
+            logger.info(
+                "已启用指令白名单，共 %d 个用户", len(self.whitelist)
+            )
+        else:
+            logger.info("指令白名单为空，所有用户均可使用指令")
+
+    def _collect_sender_identifiers(self, event: AstrMessageEvent):
+        """收集用于白名单判断的标识符"""
+        identifiers = []
+
+        try:
+            sender_id = event.get_sender_id()
+        except AttributeError:
+            sender_id = None
+
+        if sender_id is not None:
+            sender_str = str(sender_id).strip()
+            if sender_str:
+                identifiers.append(sender_str)
+
+        unified = getattr(event, "unified_msg_origin", None)
+        if unified is not None:
+            unified_str = str(unified).strip()
+            if unified_str:
+                identifiers.append(unified_str)
+
+        return identifiers
+
+    def _is_whitelisted(self, event: AstrMessageEvent) -> bool:
+        """检查事件发送者是否在白名单内"""
+        if not self.whitelist:
+            return True
+
+        identifiers = self._collect_sender_identifiers(event)
+        for identifier in identifiers:
+            if identifier in self.whitelist:
+                return True
+
+        return False
+
+    def _format_identifiers(self, identifiers) -> str:
+        return ", ".join(identifiers) if identifiers else "<unknown>"
+
+    def _command_not_allowed_message(self) -> str:
+        return "抱歉，你没有权限使用该指令，请联系管理员添加到白名单。"
+
+    def _guard_command(self, event: AstrMessageEvent):
+        """检查白名单并返回是否允许执行指令"""
+        if self._is_whitelisted(event):
+            return True, None
+
+        identifiers = self._collect_sender_identifiers(event)
+        logger.info(
+            "阻止非白名单用户使用指令，标识符: %s",
+            self._format_identifiers(identifiers),
+        )
+        return False, self._command_not_allowed_message()
+
     @filter.command_group("kr")
     def kr(self):
         pass
@@ -63,6 +144,11 @@ class krPlugin(Star):
     @kr.command("help")
     async def kr_help(self, event: AstrMessageEvent):
         """关键词回复插件帮助"""
+        allowed, denial_msg = self._guard_command(event)
+        if not allowed:
+            yield event.plain_result(denial_msg)
+            return
+
         help_text = """
 • /kr list - 查看所有关键词规则
 • /kr add <关键词> <回复内容> - 添加新的关键词回复
@@ -74,6 +160,11 @@ class krPlugin(Star):
     @kr.command("list")
     async def list_keywords(self, event: AstrMessageEvent):
         """列出所有关键词规则"""
+        allowed, denial_msg = self._guard_command(event)
+        if not allowed:
+            yield event.plain_result(denial_msg)
+            return
+
         if not self.keywords:
             yield event.plain_result("当前没有配置任何关键词回复规则。")
             return
@@ -91,6 +182,11 @@ class krPlugin(Star):
     @kr.command("add")
     async def add_keyword(self, event: AstrMessageEvent, keyword: str, reply: str):
         """添加新的关键词回复"""
+        allowed, denial_msg = self._guard_command(event)
+        if not allowed:
+            yield event.plain_result(denial_msg)
+            return
+
         if keyword in self.keywords:
             if reply not in self.keywords[keyword]:
                 self.keywords[keyword].append(reply)
@@ -110,6 +206,11 @@ class krPlugin(Star):
     @kr.command("del")
     async def delete_keyword(self, event: AstrMessageEvent, keyword: str):
         """删除关键词回复"""
+        allowed, denial_msg = self._guard_command(event)
+        if not allowed:
+            yield event.plain_result(denial_msg)
+            return
+
         if keyword in self.keywords:
             del self.keywords[keyword]
             yield event.plain_result(f"已删除关键词 '{keyword}' 的回复规则。")
@@ -120,11 +221,14 @@ class krPlugin(Star):
     @kr.command("reload")
     async def reload_config(self, event: AstrMessageEvent):
         """重新加载配置"""
-        self.keywords = self._load_keywords()
+        allowed, denial_msg = self._guard_command(event)
+        if not allowed:
+            yield event.plain_result(denial_msg)
+            return
 
-        self.enable_regex = self.config.get("enable_regex", False)
-        self.case_sensitive = self.config.get("case_sensitive", False)
-        self.reply_probability = self.config.get("reply_probability", 1.0)
+        self.keywords = self._load_keywords()
+        self._normalize_keywords()
+        self._load_runtime_settings()
 
         yield event.plain_result(
             f"配置已重新加载！当前共有 {len(self.keywords)} 个关键词规则。"
@@ -183,15 +287,15 @@ class krPlugin(Star):
     def _is_safe_regex(self, pattern: str) -> bool:
         """正则表达式安全检查"""
         dangerous_patterns = [
-            r'\(\?\:',  
-            r'\(\?\!', 
-            r'\(\?\<',  
-            r'\*\+',    
-            r'\+\*',    
-            r'\*\*',   
-            r'\+\+',   
-            r'\(\.*\+.*\)\+',  
-            r'\{.*\}.*\{.*\}', 
+            r'\(\?\:',
+            r'\(\?\!',
+            r'\(\?\<',
+            r'\*\+',
+            r'\+\*',
+            r'\*\*',
+            r'\+\+',
+            r'\((?:[^()]*[+*{][^()]*)\)\s*\+',
+            r'\{[^{}]*\}[^{}]*\{[^{}]*\}',
         ]
         
         if len(pattern) > 100:

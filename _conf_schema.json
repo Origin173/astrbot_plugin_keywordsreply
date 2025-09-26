@@ -16,5 +16,15 @@
     "type": "float",
     "hint": "设置机器人回复的概率，范围 0.0-1.0。1.0 表示 100% 回复，0.5 表示 50% 概率回复。",
     "default": 1.0
+  },
+  "whitelist": {
+    "description": "指令使用白名单",
+    "type": "list",
+    "hint": "仅允许白名单内的用户使用插件指令，可填写用户 ID 列表。留空表示不限制。",
+    "items": {
+      "type": "string",
+      "description": "用户 ID"
+    },
+    "default": []
   }
 }
